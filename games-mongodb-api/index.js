@@ -16,7 +16,6 @@ mongoose
 // Mongose schéma her
 const gameSchema = new mongoose.Schema({
     name: String,
-    producer: String,
     platform: String,
     publisherID: mongoose.Schema.Types.ObjectId,
     developerID: mongoose.Schema.Types.ObjectId,
@@ -32,7 +31,7 @@ const gameSchema = new mongoose.Schema({
 // Mongose schéma firem
 const companySchema = new mongoose.Schema({
     name: String,
-    founded: Date,
+    founded: Number,
     headquarters: String,
     perex: String,
     role: String    // "developer" nebo "publisher"
@@ -59,7 +58,7 @@ app.get("/api/games/:id", (req, res) => {
     });
 });
 
-// POST metoda
+// POST metoda hry
 app.post('/api/games', (req, res) => {
     const { error } = validateGame(req.body);
     if (error) {
@@ -71,12 +70,25 @@ app.post('/api/games', (req, res) => {
     }
 });
 
+// POST metoda firmy
+app.post('/api/company', (req, res) => {
+    const { error } = validatePerson(req.body);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+    } else {
+        Company.create(req.body)
+            .then(result => { res.json(result) })
+            .catch(err => { res.send("Nepodařilo se uložit firmu! :-(") });
+    }
+});
+
 // validace vstupních dat
 function validateGame(game, required = true) {
     const schema = Joi.object({
         name:           Joi.string().min(3),
-        producer:       Joi.string(),
         platform:       Joi.string(),
+        publisherID:    Joi.string(),
+        developerID:    Joi.string(),
         genres:         Joi.array().items(Joi.string()).min(1),
         isAvailable:    Joi.bool(),
         pegi:           Joi.number()
@@ -87,7 +99,7 @@ function validateGame(game, required = true) {
 function validateCompany(company, required = true) {
     const schema = Joi.object({
         name:           Joi.string().min(3),
-        founded:        Joi.date(),
+        founded:        Joi.number(),
         headquarters:   Joi.string().min(2),
         perex:          Joi.string().min(10),
         role:           Joi.string().valid("developer", "publisher")
@@ -95,4 +107,34 @@ function validateCompany(company, required = true) {
     return schema.validate(company,{ presence: (required) ? "required" : "optional" });
 }
 
+function validateGet(getData) {
+    const schema = Joi.object({
+        limit:          Joi.number().min(1),
+        genre:      Joi.string().valid(...genres),
+        publisherID:    Joi.string().min(3),
+        developerID:    Joi.string().min(3)
+    })
+    return schema.validate(getData, { presence: "optional" });
+}
 
+async function saveCompany() {
+    const newCompany = new Company({
+        name: "Ubisoft",
+        founded: 1986,
+        headquarters: "Saint-Mandé, France",
+        perex: "Ubisoft Entertainment SA (dříve Ubi Soft Entertainment SA či zkráceně Ubi Soft) je francouzský videoherní vývojář a vydavatel. Hlavní sídlo společnosti je v Montreuil ve Francii. Společnost má pobočky ve více než dvaceti zemích.",
+        role: "publisher"
+    });
+    const result = await newCompany.save();
+    console.log(result.id);
+}
+
+
+
+
+// async function saveGame() {
+//     const newGame = new Game({
+//         name: "ASSASSIN'S CREED ODYSSEY",
+//
+//     })
+// }
