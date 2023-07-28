@@ -68,22 +68,95 @@ app.get('/api/games', (req, res) => {
     dbQuery
         .then(games => { res.json(games) })
         .catch(err => { res.status(400).send("Požadavek na videohry selhal!"); });
-
-})
-
-app.get("/api/games", (req, res) => {
-    Game.find().then(games => { res.json(games) })
 });
+
+// asyncrhonní metoda pro získání hry z databáze podle vývojářské nebo distributorské firmy
+async function getGameByID(id) {
+    let game = await Game.findById(id);
+    if (game) {
+        game = game.toJSON();
+        let publisher = await Company.findById(game.publisherID).select("_id name");
+        let developer = await Company.findById(game.developerID).select("_id name");
+        game.publisherID = publisher.toJSON();
+        game.developerID = developer.toJSON();
+    }
+    return game;
+}
 app.get("/api/games/:id", (req, res) => {
-    const id = String(req.params.id);
-    Game.findById(id, (err, result) => {
-        if (err || !result) {
-            res.status(404).send("Hra není v naší databázi.");
-        }
+    getGameByID(req.params.id)
+        .then(game => {
+            if (game)
+                res.send(game);
+            else
+                res.status(404).send("Videohra s daným ID nebyla nalezena!");
+        })
+        .catch(err => { res.status(400).send("Chyba požadavku GET na hru!") });
+});
+
+app.get('/api/developers', (req, res) => {
+    const { error } = validateGet(req.query);
+    if (error){
+        res.status(400).send(error.details[0].message);
+        return;
+    }
+    let dbQuery = Company.find().where("role", "developer");
+    if (req.query.limit)
+        dbQuery = dbQuery.limit(parseInt(req.query.limit));
+    dbQuery
+        .then(developers => { res.json(developers); })
+        .catch(err => { res.status(400).send("Chyba požadavku na vývojáře!"); });
+});
+
+app.get('/api/publishers', (req, res) => {
+    const { error } = validateGet(req.query);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+        return;
+    }
+    let dbQuery = Company.find().where("role", "publisher");
+    if (req.query.limit)
+        dbQuery = dbQuery.limit(parseInt(req.query.limit));
+    dbQuery
+        .then(publishers => { res.json(publishers); })
+        .catch(err => { res.status(400).send("Chyba požadavku na distributory!"); });
+});
+
+app.get('/api/companies/:id', (req, res) => {
+    Company.findById(req.params.id, (err, company) => {
+        if (err)
+            res.status(400).send("Firma s daným ID nebyla nalezena!");
         else
-            res.json(result);
+            res.json(company);
     });
 });
+
+app.get('/api/genres', (req, res) => {
+    res.json(genres);
+});
+
+// PUT metody
+app.put('/api/games/:id', (req, res) => {
+    const { error } = validateGame(req.body, false);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+    } else {
+        Game.findByIdAndUpdate(req.params.id, req.body, { new: true })
+            .then(result => { res.json(result) })
+            .catch(err => { res.send("Nepodařilo se uložit hru!") });
+    }
+});
+
+app.put('/api/companies/:id', (req, res) => {
+    const { error } = validateCompany(req.body, false);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+    } else {
+        Company.findByIdAndUpdate(req.params.id, req.body, { new: true })
+            .then(result => { res.json(result) })
+            .catch(err => { res.send("Nepodařilo se uložit firmu") });
+    }
+});
+
 
 // POST metoda hry
 app.post('/api/games', (req, res) => {
