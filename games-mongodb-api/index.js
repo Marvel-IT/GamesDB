@@ -243,25 +243,3 @@ function validateGet(getData) {
     })
     return schema.validate(getData, { presence: "optional" });
 }
-
-// async function saveCompany() {
-//     const newCompany = new Company({
-//         name: "Ubisoft",
-//         founded: 1986,
-//         headquarters: "Saint-Mandé, France",
-//         perex: "Ubisoft Entertainment SA (dříve Ubi Soft Entertainment SA či zkráceně Ubi Soft) je francouzský videoherní vývojář a vydavatel. Hlavní sídlo společnosti je v Montreuil ve Francii. Společnost má pobočky ve více než dvaceti zemích.",
-//         role: "publisher"
-//     });
-//     const result = await newCompany.save();
-//     console.log(result.id);
-// }
-
-
-
-
-// async function saveGame() {
-//     const newGame = new Game({
-//         name: "ASSASSIN'S CREED ODYSSEY",
-//
-//     })
-// }
