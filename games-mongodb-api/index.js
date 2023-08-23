@@ -63,6 +63,115 @@ const genres = ["Adventure", "Action", "RPG", "Fantasy", "Strategy", "Simulation
 const platform = ["PlayStation 5", "PlayStation 4", "Xbox Series", "Xbox One", "PC", "Nintendo"]
 //
 
+// validace vstupních dat
+function validateGame(game, required = true) {
+    const schema = Joi.object({
+        name:           Joi.string().min(3),
+        platform:       Joi.array().items(Joi.string().valid(...platform)).min(1),
+        publisherID:    Joi.string(),
+        developerID:    Joi.string(),
+        genres:         Joi.array().items(Joi.string().valid(...genres)).min(1),
+        isAvailable:    Joi.bool(),
+        pegi:           Joi.number()
+    });
+    return schema.validate(game, { presence: (required) ? "required" : "optional"});
+}
+
+function validateCompany(company, required = true) {
+    const schema = Joi.object({
+        name:           Joi.string().min(3),
+        founded:        Joi.number(),
+        headquarters:   Joi.string().min(2),
+        perex:          Joi.string().min(10),
+        role:           Joi.string().valid("developer", "publisher")
+    });
+    return schema.validate(company,{ presence: (required) ? "required" : "optional" });
+}
+
+function validateGet(getData) {
+    const schema = Joi.object({
+        limit:          Joi.number().min(1),
+        platform:       Joi.string().valid(...platform),
+        genre:          Joi.string().valid(...genres),
+        publisherID:    Joi.string().min(3),
+        developerID:    Joi.string().min(3)
+    })
+    return schema.validate(getData, { presence: "optional" });
+}
+
+function validateUser(data) {
+    const schema = Joi.object({
+        email: Joi.string().email(),
+        password: Joi.string().min(4)
+    });
+    return schema.validate(data, {presence: "required"});
+}
+
+function validateLogin(data) {
+    const schema = Joi.object({
+        email: Joi.string(),
+        password: Joi.string()
+    });
+    return schema.validate(data, {presence: "required"});
+}
+
+// Route handlers
+const requireAuthHandler = (req, res, next) => {
+    const user = req.session.user;
+    if (!user) {
+        res.status(401).send("Nejprve se přihlaste");
+        return;
+    }
+    User.findById(user._id)
+        .then((user) => {
+            if (user === null) {
+                req.session.destroy((err) => {
+                    if (err) {
+                        res.status(500).send("Nastala chyba při autentizaci");
+                        return;
+                    }
+                    res.status(401).send("Nejprve se přihlaste");
+                });
+                return;
+            }
+            next();
+        })
+        .catch(() => {
+            res.status(500).send("Nastala chyba při autentizaci");
+        });
+}
+// kontrola administrátora jako uživatele
+const requireAdminHandlers = [
+    requireAuthHandler,
+    (req, res, next) => {
+        const user = req.session.user;
+        if (!user.isAdmin) {
+            res.status(403).send("Nejste Administrátor!");
+            return;
+        }
+        next();
+    }
+];
+
+// Hashovací funkce
+function hashPassword(password, saltRounds = 10) {
+    return bcrypt.hashSync(password, saltRounds);
+}
+
+function verifyPassword(passwordHash, password) {   // funkce bere jako parametry 2 otisky
+    return bcrypt.compareSync(password, passwordHash);  // tyto otisky porovná pomocí metody compareSync()
+}
+
+// Session funkce 
+// - bude vracet selektované údaje uživateli po přihlášení
+// - vrátí nový objekt vytvořený podle objektu sessionData
+function getPublicSessionData(sessionData) {
+    const allowedKeys = ["_id", "email", "isAdmin"];
+    const entries = allowedKeys
+        .map(key => [key, sessionData[key]]);
+    return Object.fromEntries(entries);
+}
+
 // GET metody
 // vrátí všechny hry v databázi
 app.get('/api/games', (req, res) => {
@@ -153,18 +262,13 @@ app.get('/api/genres', (req, res) => {
     res.json(genres);
 });
 
-// GET - zobrazení informací o uživateli
-app.get("/api/auth", (req, res) => {
-    const user = req.session.user;
-    if (!user) {
-        res.status(401).send("Nejprve se přihlaste");
-        return;
-    }
-    res.send(getPublicSessionData(user));
+// GET - zobrazení informací o uživateli (pomocí route handler)
+app.get("/api/auth", requireAuthHandler, (req, res) => {
+    res.send(getPublicSessionData(req.session.user));
 });
 
 // PUT metody
-app.put('/api/games/:id', (req, res) => {
+app.put('/api/games/:id', ...requireAdminHandlers, (req, res) => {
     const { error } = validateGame(req.body, false);
     if (error) {
         res.status(400).send(error.details[0].message);
@@ -175,7 +279,7 @@ app.put('/api/games/:id', (req, res) => {
     }
 });
 
-app.put('/api/companies/:id', (req, res) => {
+app.put('/api/companies/:id', ...requireAdminHandlers, (req, res) => {
     const { error } = validateCompany(req.body, false);
     if (error) {
         res.status(400).send(error.details[0].message);
@@ -188,7 +292,7 @@ app.put('/api/companies/:id', (req, res) => {
 
 
 // POST metoda hry
-app.post('/api/games', (req, res) => {
+app.post('/api/games', requireAdminHandlers[0], requireAdminHandlers[1], (req, res) => {    // můžeme použít operátor ... místo předávání položek v poli
     const { error } = validateGame(req.body);
     if (error) {
         res.status(400).send(error.details[0].message);
@@ -200,7 +304,7 @@ app.post('/api/games', (req, res) => {
 });
 
 // POST metoda firmy
-app.post('/api/company', (req, res) => {
+app.post('/api/company', ...requireAdminHandlers, (req, res) => {
     const { error } = validateCompany(req.body);
     if (error) {
         res.status(400).send(error.details[0].message);
@@ -269,7 +373,7 @@ app.post("/api/auth", (req, res) => {
 });
 
 // DELETE metody
-app.delete('/api/games/:id', (req, res) => {
+app.delete('/api/games/:id', ...requireAdminHandlers, (req, res) => {
     Game.findByIdAndDelete(req.params.id)
         .then(result => {
             if (result)
@@ -280,7 +384,7 @@ app.delete('/api/games/:id', (req, res) => {
         .catch(err => { res.send("Chyba při mazání hry!") });
 })
 
-app.delete('/api/company/:id', (req, res) => {
+app.delete('/api/company/:id', ...requireAdminHandlers, (req, res) => {
     Game.find({ $or: [{ publisherID: req.params.id }, { developerID: req.params.id }] }).countDocuments()
         .then(count => {
             if (count != 0)
@@ -304,74 +408,3 @@ app.delete("/api/auth", (req, res) => {
     res.send("Uživatel odhlášen");
     });
 });
-
-// validace vstupních dat
-function validateGame(game, required = true) {
-    const schema = Joi.object({
-        name:           Joi.string().min(3),
-        platform:       Joi.array().items(Joi.string().valid(...platform)).min(1),
-        publisherID:    Joi.string(),
-        developerID:    Joi.string(),
-        genres:         Joi.array().items(Joi.string().valid(...genres)).min(1),
-        isAvailable:    Joi.bool(),
-        pegi:           Joi.number()
-    });
-    return schema.validate(game, { presence: (required) ? "required" : "optional"});
-}
-
-function validateCompany(company, required = true) {
-    const schema = Joi.object({
-        name:           Joi.string().min(3),
-        founded:        Joi.number(),
-        headquarters:   Joi.string().min(2),
-        perex:          Joi.string().min(10),
-        role:           Joi.string().valid("developer", "publisher")
-    });
-    return schema.validate(company,{ presence: (required) ? "required" : "optional" });
-}
-
-function validateGet(getData) {
-    const schema = Joi.object({
-        limit:          Joi.number().min(1),
-        platform:       Joi.string().valid(...platform),
-        genre:          Joi.string().valid(...genres),
-        publisherID:    Joi.string().min(3),
-        developerID:    Joi.string().min(3)
-    })
-    return schema.validate(getData, { presence: "optional" });
-}
-
-function validateUser(data) {
-    const schema = Joi.object({
-        email: Joi.string().email(),
-        password: Joi.string().min(4)
-    });
-    return schema.validate(data, {presence: "required"});
-}
-
-function validateLogin(data) {
-    const schema = Joi.object({
-        email: Joi.string(),
-        password: Joi.string()
-    });
-    return schema.validate(data, {presence: "required"});
-}
-
-// Hashovací funkce
-function hashPassword(password, saltRounds = 10) {
-    return bcrypt.hashSync(password, saltRounds);
-}
-
-function verifyPassword(passwordHash, password) {   // funkce bere jako parametry 2 otisky
-    return bcrypt.compareSync(password, passwordHash);  // tyto otisky porovná pomocí metody compareSync()
-}
-
-// Session funkce 
-// - bude vracet selektované údaje uživateli po přihlášení
-// - vrátí nový objekt vytvořený podle objektu sessionData
-function getPublicSessionData(sessionData) {
-    const allowedKeys = ["_id", "email", "isAdmin"];
-    const entries = allowedKeys
-        .map(key => [key, sessionData[key]]);
-    return Object.fromEntries(entries);
-}
