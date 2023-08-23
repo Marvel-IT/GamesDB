@@ -3,8 +3,18 @@ const mongoose = require('mongoose');
 const Joi = require("joi");
 const bcrypt = require("bcrypt");
 const express = require("express");
+const expressSession = require("express-session");
 const app = express();
 app.use(express.json());
+app.use(expressSession({    // registrace middleware
+    secret: "b%$#kw33$",
+    resave: false,              // nebude tvořit cookie při každé odpovědi
+    saveUninitialized: false,   
+    cookie: {
+        secure: process.env.NODE_ENV === "production",  // prohlížeč bude posílat cookie na server jen při bezpečném https spojení
+        httpOnly: true  // nebude přístupná pro JS v prohlížeči
+    }
+}));
 app.listen(API_PORT, () => console.log('Čekám na portu ' + API_PORT + '...'));
 
 // Připojení k Mongo databázi
@@ -143,6 +153,16 @@ app.get('/api/genres', (req, res) => {
     res.json(genres);
 });
 
+// GET - zobrazení informací o uživateli
+app.get("/api/auth", (req, res) => {
+    const user = req.session.user;
+    if (!user) {
+        res.status(401).send("Nejprve se přihlaste");
+        return;
+    }
+    res.send(getPublicSessionData(user));
+});
+
 // PUT metody
 app.put('/api/games/:id', (req, res) => {
     const { error } = validateGame(req.body, false);
@@ -220,6 +240,34 @@ app.post("/api/user", (req, res) => {
         });
 });
 
+// POST metoda přihlášení uživatele
+app.post("/api/auth", (req, res) => {
+    const loginData = req.body;
+    const {error} = validateLogin(req.body);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+        return;
+    }
+    User.findOne({email: loginData.email})
+        .then(user => {
+            if (!user || !verifyPassword(user.passwordHash, loginData.password)) {
+                res.status(400).send("Email nebo heslo nenalezeno!");
+                return;
+            }
+            const sessionUser = user.toObject();
+            delete sessionUser.passwordHash;
+            req.session.user = sessionUser;
+            req.session.save((err) => {
+                if (err) {
+                    res.status(500).send("Nastala chyba při přihlašování");
+                    return;
+                }
+                res.send(getPublicSessionData(sessionUser));
+            });
+        })
+        .catch(() => res.status(500).send("Nastala chyba při hledání uživatele"));
+});
+
 // DELETE metody
 app.delete('/api/games/:id', (req, res) => {
     Game.findByIdAndDelete(req.params.id)
@@ -244,6 +292,17 @@ app.delete('/api/company/:id', (req, res) => {
                     .catch(err => { res.send("Nepodařilo se smazat firmu!") });
             }
         }).catch(err => { res.status(400).send("Nepodařilo se smazat firmu!") });
+});
+
+// DELETE request - odhlášení uživatele
+app.delete("/api/auth", (req, res) => {
+    req.session.destroy((err) => {
+        if (err) {
+            res.status(500).send("Nastala chyba při mazání session");
+            return;
+        }
+    res.send("Uživatel odhlášen");
+    });
 });
 
 // validace vstupních dat
@@ -290,7 +349,29 @@ function validateUser(data) {
     return schema.validate(data, {presence: "required"});
 }
 
+function validateLogin(data) {
+    const schema = Joi.object({
+        email: Joi.string(),
+        password: Joi.string()
+    });
+    return schema.validate(data, {presence: "required"});
+}
+
 // Hashovací funkce
 function hashPassword(password, saltRounds = 10) {
     return bcrypt.hashSync(password, saltRounds);
+}
+
+function verifyPassword(passwordHash, password) {   // funkce bere jako parametry 2 otisky
+    return bcrypt.compareSync(password, passwordHash);  // tyto otisky porovná pomocí metody compareSync()
+}
+
+// Session funkce 
+// - bude vracet selektované údaje uživateli po přihlášení
+// - vrátí nový objekt vytvořený podle objektu sessionData
+function getPublicSessionData(sessionData) {
+    const allowedKeys = ["_id", "email", "isAdmin"];
+    const entries = allowedKeys
+        .map(key => [key, sessionData[key]]);
+    return Object.fromEntries(entries);
 }
