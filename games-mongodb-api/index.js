@@ -1,6 +1,7 @@
 const API_PORT = 5000;
 const mongoose = require('mongoose');
 const Joi = require("joi");
+const bcrypt = require("bcrypt");
 const express = require("express");
 const app = express();
 app.use(express.json());
@@ -37,9 +38,17 @@ const companySchema = new mongoose.Schema({
     role: String    // "developer" nebo "publisher"
 })
 
+// Mongose schéma uživatelů
+const userSchema = new mongoose.Schema({
+    email: {type: String, index: {unique: true}},
+    passwordHash: String,
+    isAdmin: Boolean
+});
+
 //
 const Game = mongoose.model("Game", gameSchema);
 const Company = mongoose.model("Company", companySchema);
+const User = mongoose.model("User", userSchema);
 const genres = ["Adventure", "Action", "RPG", "Fantasy", "Strategy", "Simulation", "Shooter", "Racing", "Sport"];
 const platform = ["PlayStation 5", "PlayStation 4", "Xbox Series", "Xbox One", "PC", "Nintendo"]
 //
@@ -182,6 +191,35 @@ app.post('/api/company', (req, res) => {
     }
 });
 
+// POST request uživatele
+app.post("/api/user", (req, res) => {
+    const userData = req.body;
+    const {error} = validateUser(userData);
+    if (error) {
+        res.status(400).send(error.details[0].message);
+        return;
+    }
+    const userCreateData = {
+        email: userData.email,
+        passwordHash: hashPassword(userData.password),
+        isAdmin: false
+    };
+
+    User.create(userCreateData)
+        .then(savedUser => {
+            const result = savedUser.toObject();
+            delete result.passwordHash;
+            res.send(result);
+        })
+        .catch(e => {
+            if (e.code === 11000) {
+                res.status(400).send("Účet se zadaným emailem již existuje");
+                return;
+            }
+            res.status(500).send("Nastala chyba při registraci");
+        });
+});
+
 // DELETE metody
 app.delete('/api/games/:id', (req, res) => {
     Game.findByIdAndDelete(req.params.id)
@@ -242,4 +280,17 @@ function validateGet(getData) {
         developerID:    Joi.string().min(3)
     })
     return schema.validate(getData, { presence: "optional" });
+}
+
+function validateUser(data) {
+    const schema = Joi.object({
+        email: Joi.string().email(),
+        password: Joi.string().min(4)
+    });
+    return schema.validate(data, {presence: "required"});
+}
+
+// Hashovací funkce
+function hashPassword(password, saltRounds = 10) {
+    return bcrypt.hashSync(password, saltRounds);
 }
